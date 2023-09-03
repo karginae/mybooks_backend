@@ -1,5 +1,3 @@
-import { validationResult } from 'express-validator';
-
 import OrderModel from '../models/Order.js';
 
 export const create = async (req, res) => {
