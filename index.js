@@ -2,19 +2,19 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import mongoose from 'mongoose';
-import multer from 'multer';
+import morgan from 'morgan';
+import rfs from 'rotating-file-stream';
+import createHttpError from 'http-errors';
 
-import { regValidator, authValidator, addBookValidator, orderValidator } from './validations.js';
+import { UserController } from './controllers/index.js';
+import bookRoutes from './routes/Book.js';
+import cartRoutes from './routes/Cart.js';
+import favoriteRoutes from './routes/Favorite.js';
+import orderRoutes from './routes/Order.js';
+import roleRoutes from './routes/Role.js';
+import { regValidator, authValidator } from './validations.js';
+import upload from './utils/uploadCover.js';
 import checkAuth from './middleware/checkAuth.js';
-import checkAdmin from './middleware/checkAdmin.js';
-import {
-  UserController,
-  BookController,
-  FavoriteController,
-  CartController,
-  RoleController,
-  OrderController,
-} from './controllers/index.js';
 import handleValidationErrors from './middleware/handleValidationErrors.js';
 
 mongoose.set('strictQuery', false);
@@ -26,19 +26,25 @@ mongoose
 
 const app = express();
 
-const storage = multer.diskStorage({
-  destination: (_, __, cb) => {
-    cb(null, 'covers');
-  },
-  filename: (_, file, cb) => {
-    cb(null, file.originalname);
-  },
+const rfsStream = rfs.createStream(process.env.LOG_FILE || 'log.txt', {
+  size: process.env.LOG_SIZE || '10M',
+  interval: process.env.LOG_INTERVAL || '1d',
+  compress: 'gzip',
 });
 
-const upload = multer({ storage });
+app.use(
+  morgan(process.env.LOG_FORMAT || 'dev', {
+    stream: process.env.LOG_FILE ? rfsStream : process.stdout,
+  }),
+);
+
+if (process.env.LOG_FILE) {
+  app.use(morgan(process.env.LOG_FORMAT || 'dev'));
+}
 
 app.use(express.json());
 app.use(cors());
+
 app.use('/covers', express.static('covers'));
 
 app.post('/covers', upload.single('image'), (req, res) => {
@@ -47,43 +53,21 @@ app.post('/covers', upload.single('image'), (req, res) => {
   });
 });
 
-app.post('/roles', RoleController.create);
-
 app.post('/auth', authValidator, handleValidationErrors, UserController.auth);
 
 app.post('/reg', regValidator, handleValidationErrors, UserController.registration);
 
 app.get('/me', checkAuth, UserController.getMe);
 
-app.post(
-  '/books',
-  checkAuth,
-  checkAdmin,
-  addBookValidator,
-  handleValidationErrors,
-  BookController.create,
-);
-app.get('/books', BookController.getAll);
-app.get('/books/:id', BookController.getOne);
-app.patch(
-  '/books/:id',
-  checkAuth,
-  checkAdmin,
-  addBookValidator,
-  handleValidationErrors,
-  BookController.update,
-);
-app.delete('/books/:id', checkAuth, checkAdmin, BookController.remove);
+app.use('/roles', roleRoutes);
+app.use('/books', bookRoutes);
+app.use('/cart', cartRoutes);
+app.use('/favorites', favoriteRoutes);
+app.use('/order', orderRoutes);
 
-app.post('/favorites', checkAuth, FavoriteController.create);
-app.get('/favorites', checkAuth, FavoriteController.getAll);
-app.delete('/favorites/:id', checkAuth, FavoriteController.remove);
-
-app.post('/cart', checkAuth, CartController.create);
-app.get('/cart', checkAuth, CartController.getAll);
-app.delete('/cart/:id', checkAuth, CartController.remove);
-
-app.post('/order', checkAuth, orderValidator, handleValidationErrors, OrderController.create);
+app.use((req, res, next) => {
+  next(createHttpError(404, 'Endpoint not found'));
+});
 
 app.listen(process.env.PORT, (error) => {
   error ? console.log(error) : console.log('Server is running');
